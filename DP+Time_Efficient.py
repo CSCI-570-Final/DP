@@ -2,6 +2,10 @@
 import sys
 import time
 import resource
+from process_input import read_input_file, generate_string, GAP_PENALTY, MISMATCH_COST
+
+def get_alpha(c1, c2):
+    return MISMATCH_COST[c1][c2]
 
 def dp_sequence_alignment(x, y):
     m = len(x)
@@ -70,6 +74,7 @@ def dp_sequence_alignment(x, y):
     print("Cost of alignment: ", opt[n][m],
           "\nFirst string alignment: ", ''.join(seq1),
           "\nSecond string alignment: ", ''.join(seq2))
+    
 
 
 def print_opt(opt):
@@ -118,10 +123,18 @@ def get_alpha(j, i):
 # ------------------------------------
 # 여기부터 추가된 부분
 # ------------------------------------
-if __name__ == '__main__':
-    # 예시: 파일에서 읽거나, 인자로 받으려면 여길 수정하세요
-    x = "ACACTGACTACTGACTGGTGACTACTGACTGG"
-    y = "TATTATACGCTATTATACGCGACGCGGACGCG"
+def main():
+    # python3 DP+Time_Efficient.py SampleTestCases/input1.txt Ours/output1_ours.txt
+    if len(sys.argv) != 3:
+        print("Usage: python3 DP+Time_Efficient.py <input_file_path> <output_file_path>")
+        sys.exit(1)
+
+    input_file = sys.argv[1]
+    output_file = sys.argv[2]
+
+    s1, idx1, s2, idx2 = read_input_file(input_file)
+    x = generate_string(s1, idx1)
+    y = generate_string(s2, idx2)
 
     # 1) 메모리(peak RSS) 측정 함수
     def memory_kb():
@@ -144,3 +157,13 @@ if __name__ == '__main__':
     # 혹은 차이를 보시려면 mem_after - mem_before
     print(f"{time_ms:.6f}")
     print(f"{mem_after:.6f}")
+    
+    with open(output_file, 'w') as f:
+        # f.write(f"{cost}\n")
+        # f.write(f"{aligned1}\n")
+        # f.write(f"{aligned2}\n")
+        f.write(f"{time_ms:.6f}\n")
+        f.write(f"{mem_after:.1f}\n")
+
+if __name__ == "__main__":
+    main()
