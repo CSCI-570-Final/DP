@@ -1,126 +1,170 @@
-#!/usr/bin/env python3
 import sys
-import time
-import resource
 import psutil
-from process_input import read_input_file, generate_string, GAP_PENALTY, MISMATCH_COST
-
-# ------------------------------------
-# Constants
-# ------------------------------------
+from resource import *
+import time
+# ---- constants & utils ----
 GAP_PENALTY = 30
+MISMATCH_COST = {
+    'A': {'A': 0, 'C': 110, 'G': 48,  'T': 94},
+    'C': {'A': 110, 'C': 0, 'G': 118, 'T': 48},
+    'G': {'A': 48,  'C': 118, 'G': 0, 'T': 110},
+    'T': {'A': 94,  'C': 48, 'G': 110, 'T': 0},
+}
 
-# ------------------------------------
-# get_alpha: substitution/gap cost
-# ------------------------------------
+def read_input_file(filepath):
+    f = open(filepath, 'r')
+    lines = []
+    for line in f:
+        text = line.strip()
+        if text != "":
+            lines.append(text)
+    f.close()
+    s1 = lines[0]
+    s2_start = 0
+    for i in range(1, len(lines)):
+        ok = True
+        for ch in lines[i]:
+            if ch not in ['A','C','G','T']:
+                ok = False
+                break
+        if ok:
+            s2_start = i
+            break
+    idx1 = []
+    for k in range(1, s2_start):
+        num = int(lines[k])
+        idx1.append(num)
+    s2 = lines[s2_start]
+    idx2 = []
+    for k in range(s2_start + 1, len(lines)):
+        num = int(lines[k])
+        idx2.append(num)
+    return s1, idx1, s2, idx2
+
+def generate_string(base, indices):
+    result = base
+    for idx in indices:
+        part1 = result[:idx+1]
+        part2 = result[idx+1:]
+        result = part1 + result + part2
+    return result
+
+# ---- alignment DP ----
 def get_alpha(c1, c2):
     if c1 == '_' or c2 == '_':
         return GAP_PENALTY
-    mp = {'A':0, 'C':1, 'G':2, 'T':3}
-    alpha = [
-        [  0, 110,  48,  94],
-        [110,   0, 118,  48],
-        [ 48, 118,   0, 110],
-        [ 94,  48, 110,   0]
-    ]
-    return alpha[mp[c1]][mp[c2]]
+    return MISMATCH_COST[c1][c2]
 
-# ------------------------------------
-# dp_sequence_alignment_return:
-# full DP, returns (cost, aligned_x, aligned_y)
-# ------------------------------------
-def dp_sequence_alignment_return(x, y):
-    m, n = len(x), len(y)
-    opt = [[0] * (m + 1) for _ in range(n + 1)]
+def print_opt(opt):
+    # DP 표를 시각화해서 출력 (원점은 왼쪽 아래)
+    output = ""
+    n = len(opt) - 1
+    for a in range(n, -1, -1):
+        output += str(opt[a])
+        if a > 0:
+            output += "\n"
+    print(output)
+
+def dp_sequence_alignment(x, y):
+    m = len(x)
+    n = len(y)
+    opt = []
+    for _ in range(n + 1):
+        row = []
+        for _ in range(m + 1):
+            row.append(0)
+        opt.append(row)
     for i in range(m + 1):
         opt[0][i] = i * GAP_PENALTY
     for j in range(n + 1):
         opt[j][0] = j * GAP_PENALTY
-
     for j in range(1, n + 1):
         for i in range(1, m + 1):
-            c_match = opt[j-1][i-1] + get_alpha(x[i-1], y[j-1])
-            c_del   = opt[j-1][i]   + GAP_PENALTY
-            c_ins   = opt[j][i-1]   + GAP_PENALTY
-            opt[j][i] = min(c_match, c_del, c_ins)
-
-    # traceback
-    seq1, seq2 = [], []
-    i, j = m, n
+            cost_match = opt[j-1][i-1] + get_alpha(y[j-1], x[i-1])
+            cost_del   = opt[j-1][i]   + GAP_PENALTY
+            cost_ins   = opt[j][i-1]   + GAP_PENALTY
+            if cost_match <= cost_del and cost_match <= cost_ins:
+                opt[j][i] = cost_match
+            elif cost_del <= cost_ins:
+                opt[j][i] = cost_del
+            else:
+                opt[j][i] = cost_ins
+    seq1 = []
+    seq2 = []
+    i = m
+    j = n
     while i > 0 and j > 0:
         curr = opt[j][i]
-        if curr == opt[j-1][i-1] + get_alpha(x[i-1], y[j-1]):
-            seq1.append(x[i-1]); seq2.append(y[j-1])
-            i -= 1; j -= 1
+        if curr == opt[j-1][i-1] + get_alpha(y[j-1], x[i-1]):
+            seq1.append(x[i-1])
+            seq2.append(y[j-1])
+            i = i - 1
+            j = j - 1
         elif curr == opt[j-1][i] + GAP_PENALTY:
-            seq1.append('_'); seq2.append(y[j-1]); j -= 1
+            seq1.append('_')
+            seq2.append(y[j-1])
+            j = j - 1
         else:
-            seq1.append(x[i-1]); seq2.append('_'); i -= 1
-
+            seq1.append(x[i-1])
+            seq2.append('_')
+            i = i - 1
     while i > 0:
-        seq1.append(x[i-1]); seq2.append('_'); i -= 1
+        seq1.append(x[i-1])
+        seq2.append('_')
+        i = i - 1
     while j > 0:
-        seq1.append('_'); seq2.append(y[j-1]); j -= 1
+        seq1.append('_')
+        seq2.append(y[j-1])
+        j = j - 1
+    seq1.reverse()
+    seq2.reverse()
+    cost = opt[n][m]
+    aligned_x = ''
+    for c in seq1:
+        aligned_x = aligned_x + c
+    aligned_y = ''
+    for c in seq2:
+        aligned_y = aligned_y + c
+    print("Cost of alignment:", cost)
+    print("First string alignment: ", aligned_x)
+    print("Second string alignment:", aligned_y)
 
-    seq1.reverse(); seq2.reverse()
-    return opt[n][m], ''.join(seq1), ''.join(seq2)
+def process_memory():
+    proc = psutil.Process()
+    return proc.memory_info().rss / 1024.0  # KB 단위, 소수점 포함
 
-# ------------------------------------
-# memory_kb: peak RSS in KB
-# ------------------------------------
-def memory_kb():
-    # return float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-    
-    process = psutil.Process()
-    memory_info = process.memory_info()
-    memory_consumed = int(memory_info.rss/1024)
-    return memory_consumed
+def time_wrapper(func, *args, **kwargs):
+    start = time.time()
+    result = func(*args, **kwargs)
+    end = time.time()
+    return (end - start) * 1000.0, result  # ms 단위
 
-
-# ------------------------------------
-# Main: read input, measure, run, output
-# ------------------------------------
+# ---- main ----
 def main():
-    # python3 DP+Time_Efficient.py SampleTestCases/input1.txt Ours/output1_ours.txt
-    if len(sys.argv) != 3:
-        print("Usage: python3 DP+Time_Efficient.py <input_file_path> <output_file_path>")
+    if len(sys.argv) != 2:
+        print("Usage: python combined_alignment.py <input_file>")
         sys.exit(1)
 
-    input_file = sys.argv[1]
-    output_file = sys.argv[2]
+    inp = sys.argv[1]
+    s1, i1, s2, i2 = read_input_file(inp)
+    full_s1 = generate_string(s1, i1)
+    full_s2 = generate_string(s2, i2)
 
-    s1, idx1, s2, idx2 = read_input_file(input_file)
-    x = generate_string(s1, idx1)
-    y = generate_string(s2, idx2)
+    print("Generated Strings:")
+    print("String 1:", full_s1)
+    print("String 2:", full_s2)
+    print()
 
-    # 1) 메모리(peak RSS) 측정 함수
-    def memory_kb():
-        return float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    # 1) 메모리·시간 측정 시작
+    mem_before = process_memory()
+    time_ms, _ = time_wrapper(dp_sequence_alignment, full_s1, full_s2)
+    mem_after = process_memory()
 
-    # 2) 실행 전 시간·메모리
-    mem_before = memory_kb()
-    t0 = time.time()
+    # 2) 메모리 사용량 계산
+    mem_used = mem_after - mem_before
 
-    # 3) 본 함수 호출
-    cost, aligned1, aligned2 =dp_sequence_alignment_return(x, y)
-
-    # 4) 실행 후 시간·메모리
-    t1 = time.time()
-    mem_after = memory_kb()
-
-    # 5) 결과 출력 (원래 출력 뒤에 두 줄)
-    time_ms = (t1 - t0) * 1000.0
-    # peak RSS 그대로 출력하려면 mem_after,
-    # 혹은 차이를 보시려면 mem_after - mem_before
     print(f"{time_ms:.6f}")
-    print(f"{mem_after:.6f}")
-    
-    with open(output_file, 'w') as f:
-        f.write(f"{cost}\n")
-        f.write(f"{aligned1}\n")
-        f.write(f"{aligned2}\n")
-        f.write(f"{time_ms:.6f}\n")
-        f.write(f"{mem_after - mem_before:.1f}\n")
+    print(f"{mem_used:.1f}")
 
 if __name__ == "__main__":
     main()

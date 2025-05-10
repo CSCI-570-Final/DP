@@ -1,202 +1,295 @@
 #!/usr/bin/env python3
 import sys
 import time
-import resource
-from process_input import read_input_file, generate_string, GAP_PENALTY, MISMATCH_COST
-
+import psutil
+from resource import *
 # ------------------------------------
 # Constants
 # ------------------------------------
 GAP_PENALTY = 30
+MISMATCH_COST = {
+    'A': {'A': 0,   'C': 110, 'G': 48,  'T': 94},
+    'C': {'A': 110, 'C': 0,   'G': 118, 'T': 48},
+    'G': {'A': 48,  'C': 118, 'G': 0,   'T': 110},
+    'T': {'A': 94,  'C': 48,  'G': 110, 'T': 0},
+}
 
 # ------------------------------------
-# get_alpha: substitution/gap cost
+# Input processing
+# ------------------------------------
+
+def read_input_file(filepath):
+    f = open(filepath, 'r')
+    lines = []
+    for line in f:
+        text = line.strip()
+        if text != "":
+            lines.append(text)
+    f.close()
+    s1 = lines[0]
+    s2_start = 0
+    for i in range(1, len(lines)):
+        ok = True
+        for ch in lines[i]:
+            if ch not in ['A','C','G','T']:
+                ok = False
+                break
+        if ok:
+            s2_start = i
+            break
+    idx1 = []
+    for k in range(1, s2_start):
+        num = int(lines[k])
+        idx1.append(num)
+    s2 = lines[s2_start]
+    idx2 = []
+    for k in range(s2_start + 1, len(lines)):
+        num = int(lines[k])
+        idx2.append(num)
+    return s1, idx1, s2, idx2
+
+def generate_string(base, indices):
+    result = base
+    for idx in indices:
+        part1 = result[:idx+1]
+        part2 = result[idx+1:]
+        result = part1 + result + part2
+    return result
+
+# ------------------------------------
+# Cost function
 # ------------------------------------
 def get_alpha(c1, c2):
     if c1 == '_' or c2 == '_':
         return GAP_PENALTY
-    mp = {'A':0, 'C':1, 'G':2, 'T':3}
-    alpha = [
-        [  0, 110,  48,  94],
-        [110,   0, 118,  48],
-        [ 48, 118,   0, 110],
-        [ 94,  48, 110,   0]
-    ]
-    return alpha[mp[c1]][mp[c2]]
+    return MISMATCH_COST[c1][c2]
 
 # ------------------------------------
-# Full DP fallback for small cases
+# Full DP (basic)
 # ------------------------------------
 def dp_sequence_alignment_return(x, y):
-    m, n = len(x), len(y)
-    opt = [[0] * (m + 1) for _ in range(n + 1)]
+    m = len(x)
+    n = len(y)
+    opt = []
+    for _ in range(n + 1):
+        row = []
+        for _ in range(m + 1):
+            row.append(0)
+        opt.append(row)
     for i in range(m + 1):
         opt[0][i] = i * GAP_PENALTY
     for j in range(n + 1):
         opt[j][0] = j * GAP_PENALTY
-
     for j in range(1, n + 1):
         for i in range(1, m + 1):
-            c_match = opt[j-1][i-1] + get_alpha(x[i-1], y[j-1])
-            c_del   = opt[j-1][i]   + GAP_PENALTY
-            c_ins   = opt[j][i-1]   + GAP_PENALTY
-            opt[j][i] = min(c_match, c_del, c_ins)
-
-    # traceback
-    seq1, seq2 = [], []
-    i, j = m, n
+            match_cost  = opt[j-1][i-1] + get_alpha(x[i-1], y[j-1])
+            delete_cost = opt[j-1][i]   + GAP_PENALTY
+            insert_cost = opt[j][i-1]   + GAP_PENALTY
+            if match_cost <= delete_cost and match_cost <= insert_cost:
+                opt[j][i] = match_cost
+            elif delete_cost <= insert_cost:
+                opt[j][i] = delete_cost
+            else:
+                opt[j][i] = insert_cost
+    seq1 = []
+    seq2 = []
+    i = m
+    j = n
     while i > 0 and j > 0:
         curr = opt[j][i]
         if curr == opt[j-1][i-1] + get_alpha(x[i-1], y[j-1]):
-            seq1.append(x[i-1]); seq2.append(y[j-1])
-            i -= 1; j -= 1
+            seq1.append(x[i-1])
+            seq2.append(y[j-1])
+            i = i - 1
+            j = j - 1
         elif curr == opt[j-1][i] + GAP_PENALTY:
-            seq1.append('_'); seq2.append(y[j-1]); j -= 1
+            seq1.append('_')
+            seq2.append(y[j-1])
+            j = j - 1
         else:
-            seq1.append(x[i-1]); seq2.append('_'); i -= 1
-
+            seq1.append(x[i-1])
+            seq2.append('_')
+            i = i - 1
     while i > 0:
-        seq1.append(x[i-1]); seq2.append('_'); i -= 1
+        seq1.append(x[i-1])
+        seq2.append('_')
+        i = i - 1
     while j > 0:
-        seq1.append('_'); seq2.append(y[j-1]); j -= 1
+        seq1.append('_')
+        seq2.append(y[j-1])
+        j = j - 1
+    seq1.reverse()
+    seq2.reverse()
+    cost = opt[n][m]
+    aligned_x = ''
+    for c in seq1:
+        aligned_x = aligned_x + c
+    aligned_y = ''
+    for c in seq2:
+        aligned_y = aligned_y + c
+    return cost, aligned_x, aligned_y
 
-    seq1.reverse(); seq2.reverse()
-    return ''.join(seq1), ''.join(seq2)
 
 # ------------------------------------
-# Linear-space cost DP
+# Linear-space cost (helper for Hirschberg)
 # ------------------------------------
 def cost_linear(x, y):
     m = len(x)
-    prev = [i * GAP_PENALTY for i in range(m+1)]
-    curr = [0] * (m+1)
-    for j in range(1, len(y)+1):
+    prev = []
+    for i in range(m + 1):
+        cost = i * GAP_PENALTY
+        prev.append(cost)
+    curr = []
+    for i in range(m + 1):
+        curr.append(0)
+    for j in range(1, len(y) + 1):
         curr[0] = j * GAP_PENALTY
-        for i in range(1, m+1):
-            c_match = prev[i-1] + get_alpha(x[i-1], y[j-1])
-            c_del   = prev[i]   + GAP_PENALTY
-            c_ins   = curr[i-1] + GAP_PENALTY
-            curr[i] = min(c_match, c_del, c_ins)
-        prev, curr = curr, prev
+        for i in range(1, m + 1):
+            match_cost  = prev[i-1] + get_alpha(x[i-1], y[j-1])
+            delete_cost = prev[i]   + GAP_PENALTY
+            insert_cost = curr[i-1] + GAP_PENALTY
+            if match_cost <= delete_cost and match_cost <= insert_cost:
+                curr[i] = match_cost
+            elif delete_cost <= insert_cost:
+                curr[i] = delete_cost
+            else:
+                curr[i] = insert_cost
+        new_prev = []
+        for value in curr:
+            new_prev.append(value)
+        prev = new_prev
+        curr = []
+        for i in range(m + 1):
+            curr.append(0)
     return prev
 
+
 # ------------------------------------
-# Hirschberg’s divide-and-conquer
+# Hirschberg’s algorithm (memory-efficient)
 # ------------------------------------
 def hirschberg(x, y):
-    m, n = len(x), len(y)
-    # if one string is empty, it's all gaps
+    m = len(x)
+    n = len(y)
     if m == 0:
-        return '_'*n, y, n * GAP_PENALTY
+        seq1 = ''
+        for _ in range(n):
+            seq1 = seq1 + '_'
+        seq2 = ''
+        for ch in y:
+            seq2 = seq2 + ch
+        cost1 = n * GAP_PENALTY
+        return seq1, seq2, cost1
     if n == 0:
-        return x, '_'*m, m * GAP_PENALTY
-    
-    # if small, fall back to full DP
+        seq1 = ''
+        for ch in x:
+            seq1 = seq1 + ch
+        seq2 = ''
+        for _ in range(m):
+            seq2 = seq2 + '_'
+        cost2 = m * GAP_PENALTY
+        return seq1, seq2, cost2
     if m == 1 or n == 1:
-        sx, sy = dp_sequence_alignment_return(x, y)
-        cost = sum(get_alpha(a, b) for a, b in zip(sx, sy))
-        return sx, sy, cost
+        cost3, sx, sy = dp_sequence_alignment_return(x, y)
+        return sx, sy, cost3
 
-    # divide
     mid = n // 2
-    left_cost  = cost_linear(x, y[:mid])
-    right_cost = cost_linear(x[::-1], y[mid:][::-1])[::-1]
-    split = min(range(m+1), key=lambda i: left_cost[i] + right_cost[i])
+    y_left = ''
+    for j in range(mid):
+        y_left = y_left + y[j]
+    y_right = ''
+    for j in range(mid, n):
+        y_right = y_right + y[j]
 
-    # conquer
-    lx, ly, lcost = hirschberg(x[:split], y[:mid])
-    rx, ry, rcost = hirschberg(x[split:], y[mid:])
+    rev_x = ''
+    for i in range(m-1, -1, -1):
+        rev_x = rev_x + x[i]
+    rev_y_right = ''
+    for j in range(len(y_right)-1, -1, -1):
+        rev_y_right = rev_y_right + y_right[j]
 
-    # combine
-    return lx + rx, ly + ry, lcost + rcost
+    left_cost = cost_linear(x, y_left)
+    right_cost_rev = cost_linear(rev_x, rev_y_right)
+
+    right_cost = []
+    for k in range(len(right_cost_rev)-1, -1, -1):
+        right_cost.append(right_cost_rev[k])
+
+    best_i = 0
+    min_sum = left_cost[0] + right_cost[0]
+    for i in range(1, m+1):
+        sum_cost = left_cost[i] + right_cost[i]
+        if sum_cost < min_sum:
+            min_sum = sum_cost
+            best_i = i
+    split = best_i
+
+    left_x = ''
+    for i in range(split):
+        left_x = left_x + x[i]
+    left_y = ''
+    for j in range(mid):
+        left_y = left_y + y[j]
+    right_x = ''
+    for i in range(split, m):
+        right_x = right_x + x[i]
+    right_y = ''
+    for j in range(mid, n):
+        right_y = right_y + y[j]
+
+    lx, ly, lc = hirschberg(left_x, left_y)
+    rx, ry, rc = hirschberg(right_x, right_y)
+
+    seq1 = lx + rx
+    seq2 = ly + ry
+    total_cost = lc + rc
+    return seq1, seq2, total_cost
+
 
 # ------------------------------------
-# memory_kb: peak RSS in KB
+# Process-memory & Time-wrapper (from sample)
 # ------------------------------------
-def memory_kb():
-    return float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+def process_memory():
+    process = psutil.Process()
+    memory_info = process.memory_info()
+    memory_consumed = int(memory_info.rss / 1024)
+    return memory_consumed
+
+def time_wrapper(func, *args, **kwargs):
+    start_time = time.time()
+    result = func(*args, **kwargs)
+    end_time   = time.time()
+    time_taken = (end_time - start_time) * 1000
+    return time_taken, result
 
 # ------------------------------------
-# Main: read, align, measure, output
+# Main entry point
 # ------------------------------------
-'''
-if __name__ == '__main__':
-    
-    if len(sys.argv) >= 3:
-        in_path, out_path = sys.argv[1], sys.argv[2]
-        with open(in_path) as f:
-            x = f.readline().strip()
-            y = f.readline().strip()
-    else:
-        x = "ACACTGACTACTGACTGGTGACTACTGACTGG"
-        y = "TATTATACGCTATTATACGCGACGCGGACGCG"
-        out_path = None
-
-    t0 = time.time()
-    seq1, seq2 = hirschberg(x, y)
-    cost = sum(get_alpha(seq1[i], seq2[i]) for i in range(len(seq1)))
-    t1 = time.time()
-
-    mem_kb = memory_kb()
-    time_ms = (t1 - t0) * 1000.0
-
-    output = '\n'.join([
-        str(cost),
-        seq1,
-        seq2,
-        f"{time_ms:.6f}",
-        f"{mem_kb:.6f}"
-    ])
-
-    if out_path:
-        with open(out_path, 'w') as f:
-            f.write(output)
-    else:
-        print(output)
-    '''
-
 def main():
-    # python3 DP+Time_Efficient.py SampleTestCases/input1.txt Ours/output1_ours.txt
     if len(sys.argv) != 3:
-        print("Usage: python3 DP+Time_Efficient.py <input_file_path> <output_file_path>")
+        print("Usage: python3 combined_alignment.py <input> <output>")
         sys.exit(1)
 
-    input_file = sys.argv[1]
-    output_file = sys.argv[2]
+    inp, outp = sys.argv[1], sys.argv[2]
+    s1, i1, s2, i2 = read_input_file(inp)
+    x = generate_string(s1, i1)
+    y = generate_string(s2, i2)
 
-    s1, idx1, s2, idx2 = read_input_file(input_file)
-    x = generate_string(s1, idx1)
-    y = generate_string(s2, idx2)
+    mem_before = process_memory()
+    time_ms, (aligned1, aligned2, cost) = time_wrapper(hirschberg, x, y)
+    mem_after  = process_memory()
+    mem_used   = mem_after - mem_before
 
-    # 1) 메모리(peak RSS) 측정 함수
-    def memory_kb():
-        return float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-
-    # 2) 실행 전 시간·메모리
-    mem_before = memory_kb()
-    t0 = time.time()
-
-    # 3) 본 함수 호출
-    aligned1, aligned2, cost = hirschberg(x, y)
-
-    # 4) 실행 후 시간·메모리
-    t1 = time.time()
-    mem_after = memory_kb()
-
-    # 5) 결과 출력 (원래 출력 뒤에 두 줄)
-    time_ms = (t1 - t0) * 1000.0
-    # peak RSS 그대로 출력하려면 mem_after,
-    # 혹은 차이를 보시려면 mem_after - mem_before
+    # stdout: 시간, 메모리 차이
     print(f"{time_ms:.6f}")
-    print(f"{mem_after:.6f}")
-    
-    with open(output_file, 'w') as f:
+    print(f"{mem_used:.1f}")
+
+    # output file: cost, seq1, seq2, time, memory
+    with open(outp, 'w') as f:
         f.write(f"{cost}\n")
         f.write(f"{aligned1}\n")
         f.write(f"{aligned2}\n")
         f.write(f"{time_ms:.6f}\n")
-        f.write(f"{mem_after:.1f}\n")
+        f.write(f"{mem_used:.1f}\n")
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
-    
