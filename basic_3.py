@@ -83,6 +83,7 @@ def time_wrapper(func, *args, **kwargs):
     end = time.time()
     return (end - start) * 1000.0, result  # ms 단위
 
+
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Usage: python basic.py <input_file> <output_file>")
@@ -92,10 +93,21 @@ if __name__ == "__main__":
     s1, i1, s2, i2 = read_input_file(infile)
     full_s1 = generate_string(s1, i1)
     full_s2 = generate_string(s2, i2)
-
+    
     mem_before = process_memory()
     time_ms, (cost, aligned_x, aligned_y) = time_wrapper(align_sequences, full_s1, full_s2)
+    
+    # validate the length requirements
+    len_aligned_x = len(aligned_x) - aligned_x.count('_')
+    len_x_ground_truth = 2 ** len(i1) * len(s1)
+    len_aligned_y = len(aligned_y) - aligned_y.count('_')
+    len_y_ground_truth = 2 ** len(i2) * len(s2)
+    if len_aligned_x != len_x_ground_truth and len_aligned_y != len_y_ground_truth:
+        print("Error: Length of aligned_x does not match the expected length.")
+        sys.exit(1)
+        
     mem_after = process_memory()
+    
     mem_used = mem_after - mem_before
 
     with open(outfile, 'w') as f:
