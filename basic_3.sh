@@ -1,7 +1,7 @@
 
 
 INPUT_DIR="datapoints"
-OUTPUT_DIR="Ours/basic"
+OUTPUT_DIR="basic"
 SCRIPT="basic_3.py"
 
 mkdir -p "$OUTPUT_DIR"

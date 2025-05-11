@@ -1,7 +1,7 @@
 
 
 INPUT_DIR="datapoints"
-OUTPUT_DIR="Ours/efficient"
+OUTPUT_DIR="efficient"
 SCRIPT="efficient_3.py"
 
 mkdir -p "$OUTPUT_DIR"
