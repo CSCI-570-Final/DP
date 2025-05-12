@@ -1,5 +1,4 @@
-
-
+#!/usr/bin/env bash
 INPUT_DIR="datapoints"
 OUTPUT_DIR="basic"
 SCRIPT="basic_3.py"

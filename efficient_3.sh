@@ -1,5 +1,4 @@
-
-
+#!/usr/bin/env bash
 INPUT_DIR="datapoints"
 OUTPUT_DIR="efficient"
 SCRIPT="efficient_3.py"

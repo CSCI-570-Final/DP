@@ -3,9 +3,7 @@ import sys
 import time
 import psutil
 from resource import *
-# ------------------------------------
-# Constants
-# ------------------------------------
+
 GAP_PENALTY = 30
 MISMATCH_COST = {
     'A': {'A': 0,   'C': 110, 'G': 48,  'T': 94},
@@ -13,11 +11,6 @@ MISMATCH_COST = {
     'G': {'A': 48,  'C': 118, 'G': 0,   'T': 110},
     'T': {'A': 94,  'C': 48,  'G': 110, 'T': 0},
 }
-
-# ------------------------------------
-# Input processing
-# ------------------------------------
-
 def read_input_file(filepath):
     f = open(filepath, 'r')
     lines = []
@@ -55,18 +48,10 @@ def generate_string(base, indices):
         part2 = result[idx+1:]
         result = part1 + result + part2
     return result
-
-# ------------------------------------
-# Cost function
-# ------------------------------------
 def get_alpha(c1, c2):
     if c1 == '_' or c2 == '_':
         return GAP_PENALTY
     return MISMATCH_COST[c1][c2]
-
-# ------------------------------------
-# Full DP (basic)
-# ------------------------------------
 def dp_sequence_alignment_return(x, y):
     m = len(x)
     n = len(y)
@@ -128,11 +113,6 @@ def dp_sequence_alignment_return(x, y):
     for c in seq2:
         aligned_y = aligned_y + c
     return cost, aligned_x, aligned_y
-
-
-# ------------------------------------
-# Linear-space cost (helper for Hirschberg)
-# ------------------------------------
 def cost_linear(x, y):
     m = len(x)
     prev = []
@@ -163,11 +143,7 @@ def cost_linear(x, y):
             curr.append(0)
     return prev
 
-
-# ------------------------------------
-# Hirschberg’s algorithm (memory-efficient)
-# ------------------------------------
-def hirschberg(x, y):
+def efficient_3(x, y):
     m = len(x)
     n = len(y)
     if m == 0:
@@ -236,18 +212,13 @@ def hirschberg(x, y):
     for j in range(mid, n):
         right_y = right_y + y[j]
 
-    lx, ly, lc = hirschberg(left_x, left_y)
-    rx, ry, rc = hirschberg(right_x, right_y)
+    lx, ly, lc = efficient_3(left_x, left_y)
+    rx, ry, rc = efficient_3(right_x, right_y)
 
     seq1 = lx + rx
     seq2 = ly + ry
     total_cost = lc + rc
     return seq1, seq2, total_cost
-
-
-# ------------------------------------
-# Process-memory & Time-wrapper (from sample)
-# ------------------------------------
 def process_memory():
     process = psutil.Process()
     memory_info = process.memory_info()
@@ -261,12 +232,8 @@ def time_wrapper(func, *args, **kwargs):
     time_taken = (end_time - start_time) * 1000
     return time_taken, result
 
-# ------------------------------------
-# Main entry point
-# ------------------------------------
 def main():
     if len(sys.argv) != 3:
-        print("Usage: python3 combined_alignment.py <input> <output>")
         sys.exit(1)
 
     inp, outp = sys.argv[1], sys.argv[2]
@@ -274,16 +241,15 @@ def main():
     x = generate_string(s1, i1)
     y = generate_string(s2, i2)
 
+    expected_len_s1 = 2 ** len(i1) * len(s1)
+    expected_len_s2 = 2 ** len(i2) * len(s2)
+    if len(x)  != expected_len_s1 or \
+       len(y)  != expected_len_s2:
+        sys.exit(1)
     mem_before = process_memory()
-    time_ms, (aligned1, aligned2, cost) = time_wrapper(hirschberg, x, y)
+    time_ms, (aligned1, aligned2, cost) = time_wrapper(efficient_3, x, y)
     mem_after  = process_memory()
     mem_used   = mem_after - mem_before
-
-    # stdout: 시간, 메모리 차이
-    print(f"{time_ms:.6f}")
-    print(f"{mem_used:.1f}")
-
-    # output file: cost, seq1, seq2, time, memory
     with open(outp, 'w') as f:
         f.write(f"{cost}\n")
         f.write(f"{aligned1}\n")
